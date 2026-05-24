@@ -1,7 +1,11 @@
+/*
+ * report.c — Relatório de estado (R) e estatísticas finais (T)
+ */
 #include <stdio.h>
 #include "report.h"
 #include "memory.h"
 
+/* Nome legível do estado do processo */
 static const char *state_name(ProcState s)
 {
     switch (s) {
@@ -15,6 +19,7 @@ static const char *state_name(ProcState s)
     }
 }
 
+/* Uma linha com os campos principais do PCB */
 static void print_pcb_line(const PCB *p)
 {
     printf("  PID=%-3d PPID=%-3d PRIO=%-2d VAR=%-6d PROG=%-15s "
@@ -26,6 +31,7 @@ static void print_pcb_line(const PCB *p)
     printf("\n");
 }
 
+/* Comando R: instantâneo de todas as filas e mapa de memória */
 void report_snapshot(int sim_time, int running_idx,
                      const PCB *pcb_table, int pcb_count,
                      const FifoQueue *blocked_queue,
@@ -37,7 +43,6 @@ void report_snapshot(int sim_time, int running_idx,
     printf("TEMPO ACTUAL: %d\n", sim_time);
     printf("============================\n");
 
-    /* Running */
     printf("PROCESSO EM EXECUCAO:\n");
     if (running_idx >= 0 && pcb_table[running_idx].active) {
         print_pcb_line(&pcb_table[running_idx]);
@@ -45,7 +50,6 @@ void report_snapshot(int sim_time, int running_idx,
         printf("  (nenhum)\n");
     }
 
-    /* Ready */
     printf("PROCESSOS PRONTOS A EXECUTAR: [%d]\n", ready_fifo->count);
     for (int i = 0; i < ready_fifo->count; i++) {
         int idx = ready_fifo->data[(ready_fifo->head + i) % MAX_PROCESSES];
@@ -53,7 +57,6 @@ void report_snapshot(int sim_time, int running_idx,
             print_pcb_line(&pcb_table[idx]);
     }
 
-    /* Blocked */
     printf("PROCESSOS BLOQUEADOS: [%d]\n", blocked_queue->count);
     for (int i = 0; i < blocked_queue->count; i++) {
         int idx = blocked_queue->data[(blocked_queue->head + i) % MAX_PROCESSES];
@@ -61,7 +64,6 @@ void report_snapshot(int sim_time, int running_idx,
             print_pcb_line(&pcb_table[idx]);
     }
 
-    /* Waiting for memory */
     if (wait_mem_queue && wait_mem_queue->count > 0) {
         printf("PROCESSOS AGUARDANDO MEMORIA: [%d]\n", wait_mem_queue->count);
         for (int i = 0; i < wait_mem_queue->count; i++) {
@@ -71,7 +73,6 @@ void report_snapshot(int sim_time, int running_idx,
         }
     }
 
-    /* Terminated */
     printf("PROCESSOS TERMINADOS: [%d]\n", terminated_list->count);
     for (int i = 0; i < terminated_list->count; i++) {
         int idx = terminated_list->data[(terminated_list->head + i) % MAX_PROCESSES];
@@ -83,6 +84,7 @@ void report_snapshot(int sim_time, int running_idx,
     printf("============================\n\n");
 }
 
+/* Comando T: turnaround, espera e utilização da CPU */
 void report_global_stats(int sim_time,
                          const PCB *pcb_table, int pcb_count)
 {
@@ -96,9 +98,11 @@ void report_global_stats(int sim_time,
     for (int i = 0; i < pcb_count; i++) {
         const PCB *p = &pcb_table[i];
         if (!p->active) continue;
-        if (p->pid == MANAGER_PID) continue;
+        if (p->pid == MANAGER_PID) continue;   /* ignorar o gestor */
+
         total++;
         total_cpu += p->cpu_time_used;
+
         if (p->state == PROC_TERMINATED) {
             finished++;
             int turnaround = p->finish_time - p->arrival_time;

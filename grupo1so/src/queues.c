@@ -1,10 +1,11 @@
+/*
+ * queues.c — Fila FIFO e fila de prioridade (min-heap)
+ */
 #include <stdio.h>
 #include <string.h>
 #include "queues.h"
 
-/* ------------------------------------------------------------------ */
-/*  FIFO Queue                                                          */
-/* ------------------------------------------------------------------ */
+/* ========== Fila FIFO ========== */
 
 void fifo_init(FifoQueue *q)
 {
@@ -38,12 +39,12 @@ int fifo_peek(const FifoQueue *q)
     return q->data[q->head];
 }
 
+/* Remove um índice específico (mantém ordem dos restantes) */
 int fifo_remove(FifoQueue *q, int idx)
 {
     for (int i = 0; i < q->count; i++) {
         int pos = (q->head + i) % MAX_PROCESSES;
         if (q->data[pos] == idx) {
-            /* Shift remaining elements */
             for (int j = i; j < q->count - 1; j++) {
                 int cur  = (q->head + j)     % MAX_PROCESSES;
                 int next = (q->head + j + 1) % MAX_PROCESSES;
@@ -54,7 +55,7 @@ int fifo_remove(FifoQueue *q, int idx)
             return 0;
         }
     }
-    return -1; /* not found */
+    return -1;
 }
 
 int fifo_size(const FifoQueue *q) { return q->count; }
@@ -68,9 +69,7 @@ void fifo_print(const FifoQueue *q, const char *label)
     printf("\n");
 }
 
-/* ------------------------------------------------------------------ */
-/*  Priority Queue (min-heap)                                          */
-/* ------------------------------------------------------------------ */
+/* ========== Fila de prioridade (min-heap) ========== */
 
 void prio_init(PrioQueue *q, PQCmp cmp, const PCB *tbl)
 {
@@ -84,6 +83,7 @@ static void heap_swap(PrioQueue *q, int i, int j)
     int tmp = q->data[i]; q->data[i] = q->data[j]; q->data[j] = tmp;
 }
 
+/* Sobe o elemento até estar na posição correcta do heap */
 static void sift_up(PrioQueue *q, int i)
 {
     while (i > 0) {
@@ -95,6 +95,7 @@ static void sift_up(PrioQueue *q, int i)
     }
 }
 
+/* Desce o elemento até estar na posição correcta */
 static void sift_down(PrioQueue *q, int i)
 {
     int n = q->count;
@@ -148,6 +149,7 @@ int prio_remove(PrioQueue *q, int idx)
 
 int prio_size(const PrioQueue *q) { return q->count; }
 
+/* Usado no SJF quando remaining muda (instrução L) */
 void prio_rebuild(PrioQueue *q)
 {
     for (int i = q->count / 2 - 1; i >= 0; i--)

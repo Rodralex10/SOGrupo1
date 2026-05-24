@@ -1,3 +1,6 @@
+/*
+ * process.c — PCB, fork e interpretador de instruções
+ */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -5,6 +8,7 @@
 #include "memory.h"
 #include "loader.h"
 
+/* Procura primeira entrada livre na tabela de PCB */
 int process_alloc_pcb(PCB *pcb_table, int *pcb_count)
 {
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -20,6 +24,7 @@ int process_alloc_pcb(PCB *pcb_table, int *pcb_count)
     return -1;
 }
 
+/* Cria filho como cópia do pai (instrução C) */
 int process_fork(int parent_idx, PCB *pcb_table, int *pcb_count,
                  int new_pid, int sim_time)
 {
@@ -29,7 +34,6 @@ int process_fork(int parent_idx, PCB *pcb_table, int *pcb_count,
     PCB *parent = &pcb_table[parent_idx];
     PCB *child  = &pcb_table[ci];
 
-    /* Copy parent state */
     *child = *parent;
     child->pid          = new_pid;
     child->ppid         = parent->pid;
@@ -39,31 +43,18 @@ int process_fork(int parent_idx, PCB *pcb_table, int *pcb_count,
     child->finish_time  = 0;
     child->arrival_time = sim_time;
 
-    /* Child will execute the instruction AFTER C (parent already advanced) */
-    /* pc is copied from parent at the C instruction offset;
-       parent will be advanced by n in exec_one after fork returns */
-
-    /* Increment ref_count for the shared program in memory */
+    /* Programa partilhado: mais um processo usa o mesmo código */
     int slot = memory_find_slot(parent->program_name);
     if (slot >= 0) prog_slots[slot].ref_count++;
 
     return ci;
 }
 
-/*
- * Execute one instruction for process at pcb_table[idx].
- * Returns:
- *   0 = normal
- *   1 = blocked
- *   2 = terminated
- *   3 = forked (child index in *child_idx_out)
- *   4 = loaded new program
- */
 int process_exec_one(int idx, PCB *pcb_table, int *pcb_count,
                      int *child_idx_out, int new_pid, int sim_time)
 {
     PCB *p = &pcb_table[idx];
-    int abs_pc = p->memory_start + p->pc;
+    int abs_pc = p->memory_start + p->pc;   /* PC absoluto em memory[] */
 
     if (abs_pc < 0 || abs_pc >= MEMORY_SIZE) {
         fprintf(stderr, "process %d: PC %d out of range\n", p->pid, abs_pc);
@@ -75,7 +66,7 @@ int process_exec_one(int idx, PCB *pcb_table, int *pcb_count,
     Instruction ins = memory[abs_pc];
 
     if (ins.op == INS_NOP) {
-        /* Treat NOP/past-end as implicit termination */
+        /* Fim do programa sem T explícito */
         p->state       = PROC_TERMINATED;
         p->finish_time = sim_time + 1;
         return 2;
@@ -85,45 +76,43 @@ int process_exec_one(int idx, PCB *pcb_table, int *pcb_count,
     p->remaining = (p->remaining > 0) ? p->remaining - 1 : 0;
 
     switch (ins.op) {
-    case INS_M:
+    case INS_M:   /* atribuir */
         p->var = ins.n;
         p->pc++;
         return 0;
 
-    case INS_A:
+    case INS_A:   /* somar */
         p->var += ins.n;
         p->pc++;
         return 0;
 
-    case INS_S:
+    case INS_S:   /* subtrair */
         p->var -= ins.n;
         p->pc++;
         return 0;
 
-    case INS_B:
+    case INS_B:   /* bloquear */
         p->state = PROC_BLOCKED;
         p->pc++;
         return 1;
 
-    case INS_T:
+    case INS_T:   /* terminar e libertar memória */
         p->state       = PROC_TERMINATED;
-        p->finish_time = sim_time + 1; /* end of this time unit */
+        p->finish_time = sim_time + 1;
         memory_release(p->program_name, pcb_table, *pcb_count);
         return 2;
 
     case INS_C: {
         /*
-         * Fork: child starts at pc+1 (instruction after C).
-         * Parent jumps n instructions forward (to pc + 1 + n).
-         * The child inherits pc = p->pc (will be set to pc+1 below).
+         * Fork: filho executa a instrução logo após C;
+         * pai salta para pc + 1 + n (ignora n instruções).
          */
-        int child_pc = p->pc + 1;  /* child begins at instruction after C */
-        p->pc = p->pc + 1 + ins.n; /* parent jumps n ahead */
+        int child_pc = p->pc + 1;
+        p->pc = p->pc + 1 + ins.n;
 
         int ci = process_fork(idx, pcb_table, pcb_count, new_pid, sim_time);
-        if (ci < 0) return 0; /* fork failed silently */
+        if (ci < 0) return 0;
 
-        /* Set child PC to instruction after C */
         pcb_table[ci].pc = child_pc;
 
         if (child_idx_out) *child_idx_out = ci;
@@ -131,18 +120,16 @@ int process_exec_one(int idx, PCB *pcb_table, int *pcb_count,
     }
 
     case INS_L: {
-        /* Replace program: release old, load new */
+        /* Troca de programa: liberta o antigo e carrega o novo */
         memory_release(p->program_name, pcb_table, *pcb_count);
 
         int start = memory_load_program(ins.nome, pcb_table, *pcb_count);
         if (start < 0) {
-            /* Cannot load new program — terminate */
             p->state       = PROC_TERMINATED;
             p->finish_time = sim_time + 1;
             return 2;
         }
 
-        /* Reload remaining count for SJF */
         int slot = memory_find_slot(ins.nome);
         p->memory_start = start;
         p->memory_len   = (slot >= 0) ? prog_slots[slot].length : 0;

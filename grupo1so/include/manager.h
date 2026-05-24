@@ -1,59 +1,39 @@
+/*
+ * manager.h — Gestor central da simulação
+ * Expõe o estado global e as funções do ciclo de vida
+ */
 #ifndef MANAGER_H
 #define MANAGER_H
 
 #include "types.h"
 #include "queues.h"
 
-/* ------------------------------------------------------------------ */
-/*  Global simulator state (accessible to all modules via manager.h)  */
-/* ------------------------------------------------------------------ */
+/* --- Estado global (partilhado por todos os módulos) --- */
 extern PCB        pcb_table[MAX_PROCESSES];
-extern int        pcb_count;
-extern int        next_pid;
-extern int        sim_time;
-extern int        running_idx;   /* -1 = idle */
+extern int        pcb_count;      /* nº de entradas usadas na tabela */
+extern int        next_pid;       /* próximo PID a atribuir */
+extern int        sim_time;       /* relógio da simulação */
+extern int        running_idx;    /* índice do PCB em execução; -1 = CPU livre */
 extern SimConfig  cfg;
 
-extern FifoQueue  ready_fifo;
-extern FifoQueue  blocked_queue;
-extern FifoQueue  terminated_list;
+extern FifoQueue  ready_fifo;       /* fila de prontos (FCFS) */
+extern FifoQueue  blocked_queue;    /* processos bloqueados */
+extern FifoQueue  terminated_list;  /* processos terminados */
 
-/* prio_ready is used for Priority / SJF / RM / EDF */
 #include "scheduler.h"
-extern PrioQueue  ready_prio;
+extern PrioQueue  ready_prio;       /* fila com prioridade (Priority/SJF/RM/EDF) */
 
 extern PlanEntry  plan_entries[MAX_PLAN_ENTRIES];
 extern int        plan_count;
 
-/* ------------------------------------------------------------------ */
-/*  API                                                                */
-/* ------------------------------------------------------------------ */
-
-/* Parse config file, then override with CLI args */
-void manager_init(int argc, char **argv);
-
-/* Load plan.txt into plan_entries */
-void manager_load_plan(void);
-
-/* Check plan_entries for arrivals at sim_time, create PCBs */
-void manager_check_arrivals(void);
-
-/* Main control loop: read control.txt/stdin and dispatch commands */
-void manager_run(void);
-
-/* Execute one quantum for the running process; handle context switch */
-void manager_exec_quantum(void);
-
-/* Interrupt and block the running process */
-void manager_interrupt(void);
-
-/* Terminate the simulation and print global stats */
-void manager_terminate(void);
-
-/* Place a process into the ready structure (handles preemption check) */
-void manager_make_ready(int idx);
-
-/* Context switch: save running, pick next, load it */
-void manager_context_switch(void);
+void manager_init(int argc, char **argv);       /* arranque e configuração */
+void manager_load_plan(void);                   /* lê plan.txt */
+void manager_check_arrivals(void);              /* cria processos no instante certo */
+void manager_run(void);                         /* ciclo de comandos E/I/D/R/T */
+void manager_exec_quantum(void);                /* comando E */
+void manager_interrupt(void);                   /* comando I */
+void manager_terminate(void);                   /* comando T — estatísticas */
+void manager_make_ready(int idx);               /* coloca na fila de prontos */
+void manager_context_switch(void);              /* escolhe próximo processo */
 
 #endif /* MANAGER_H */

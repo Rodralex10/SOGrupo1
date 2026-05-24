@@ -94,8 +94,6 @@ trabalho/
 │   ├── control.txt
 │   ├── config.txt
 │   └── programs/     # *.prg
-└── docs/
-    └── RELATORIO.md
 ```
 
 ## Exemplo rápido
