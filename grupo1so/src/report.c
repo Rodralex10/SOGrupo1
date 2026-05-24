@@ -1,7 +1,6 @@
 /*
  * report.c — Relatório de estado (R) e estatísticas finais (T)
  */
-#include <stdio.h>
 #include "report.h"
 #include "memory.h"
 

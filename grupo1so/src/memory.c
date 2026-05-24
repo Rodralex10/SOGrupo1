@@ -1,9 +1,6 @@
 /*
  * memory.c — Gestão do array de instruções e partições
  */
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include "memory.h"
 #include "loader.h"
 

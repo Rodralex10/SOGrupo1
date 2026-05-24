@@ -1,8 +1,6 @@
 /*
  * queues.c — Fila FIFO e fila de prioridade (min-heap)
  */
-#include <stdio.h>
-#include <string.h>
 #include "queues.h"
 
 /* ========== Fila FIFO ========== */

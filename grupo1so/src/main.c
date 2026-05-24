@@ -1,7 +1,6 @@
 /*
  * main.c — Ponto de entrada do simulador
  */
-#include <stdio.h>
 #include "manager.h"
 
 int main(int argc, char *argv[])

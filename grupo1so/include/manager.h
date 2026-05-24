@@ -5,6 +5,7 @@
 #ifndef MANAGER_H
 #define MANAGER_H
 
+#include <strings.h>
 #include "types.h"
 #include "queues.h"
 

@@ -3,12 +3,6 @@
  * Configuração, chegadas, escalonamento, comandos E/I/D/R/T
  */
 #define _POSIX_C_SOURCE 200809L
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
-#include <ctype.h>
-#include <time.h>
 #include "manager.h"
 #include "memory.h"
 #include "loader.h"
