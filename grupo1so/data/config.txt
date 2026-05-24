@@ -1,0 +1,8 @@
+# Configuracao do simulador
+scheduler=fcfs
+quantum=4
+preemptive=1
+memory_total=1000
+partition_count=4
+plan_file=data/plan.txt
+control_file=data/control.txt

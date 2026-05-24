@@ -1,0 +1,3 @@
+# Teste de prioridades: prioridade 1 (alta) chega depois mas deve preemptar
+p1.prg         0   5
+prio_high.prg  2   1

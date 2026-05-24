@@ -1,0 +1,3 @@
+# Teste de bloqueio/desbloqueio
+blk.prg  0  5
+blk.prg  0  3

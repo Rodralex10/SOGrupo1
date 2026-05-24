@@ -1,0 +1,14 @@
+# Sequencia de comandos do simulador
+# E = executar quantum   I = interromper   D = desbloquear
+# R = relatorio          T = terminar
+E
+E
+E
+R
+E
+E
+E
+E
+E
+R
+T

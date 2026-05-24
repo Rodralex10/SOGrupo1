@@ -1,0 +1,2 @@
+# programa   chegada  prioridade  [periodo  deadline]
+p1.prg       0        4
