@@ -1,10 +1,6 @@
 /*
  * loader.c — Leitura e interpretação de ficheiros .prg
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
 #include "loader.h"
 #include "types.h"
 

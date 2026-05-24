@@ -1,9 +1,6 @@
 /*
  * process.c — PCB, fork e interpretador de instruções
  */
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include "process.h"
 #include "memory.h"
 #include "loader.h"
