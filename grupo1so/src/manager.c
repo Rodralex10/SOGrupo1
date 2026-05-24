@@ -1,3 +1,7 @@
+/*
+ * manager.c — Núcleo do simulador
+ * Configuração, chegadas, escalonamento, comandos E/I/D/R/T
+ */
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,9 +16,7 @@
 #include "scheduler.h"
 #include "report.h"
 
-/* ------------------------------------------------------------------ */
-/*  Global state                                                        */
-/* ------------------------------------------------------------------ */
+/* --- Variáveis globais da simulação --- */
 PCB        pcb_table[MAX_PROCESSES];
 int        pcb_count   = 0;
 int        next_pid    = 1;
@@ -25,16 +27,13 @@ SimConfig  cfg;
 FifoQueue  ready_fifo;
 FifoQueue  blocked_queue;
 FifoQueue  terminated_list;
-FifoQueue  wait_mem_queue;
+FifoQueue  wait_mem_queue;   /* à espera de memória ou partição */
 PrioQueue  ready_prio;
 
 PlanEntry  plan_entries[MAX_PLAN_ENTRIES];
 int        plan_count  = 0;
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
+/* Converte string do config/CLI em algoritmo */
 static SchedAlgo parse_algo(const char *s)
 {
     if (strcasecmp(s, "priority") == 0) return SCHED_PRIORITY;
@@ -44,6 +43,7 @@ static SchedAlgo parse_algo(const char *s)
     return SCHED_FCFS;
 }
 
+/* Escolhe o comparador do heap consoante o algoritmo */
 static PQCmp algo_cmp(SchedAlgo algo)
 {
     switch (algo) {
@@ -51,10 +51,11 @@ static PQCmp algo_cmp(SchedAlgo algo)
     case SCHED_SJF:      return cmp_sjf;
     case SCHED_RM:       return cmp_rm;
     case SCHED_EDF:      return cmp_edf;
-    default:             return cmp_priority; /* unused for FCFS */
+    default:             return cmp_priority;
     }
 }
 
+/* Lê ficheiro chave=valor (linhas # são comentários) */
 static void load_config_file(const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -65,7 +66,6 @@ static void load_config_file(const char *path)
         if (line[0] == '#' || line[0] == '\0') continue;
         char key[64], val[128];
         if (sscanf(line, "%63[^=]=%127s", key, val) != 2) continue;
-        /* Trim key */
         char *k = key;
         while (isspace((unsigned char)*k)) k++;
         char *end = k + strlen(k) - 1;
@@ -82,15 +82,11 @@ static void load_config_file(const char *path)
     fclose(f);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Initialization                                                      */
-/* ------------------------------------------------------------------ */
-
 void manager_init(int argc, char **argv)
 {
-    srand((unsigned)time(NULL));
+    srand((unsigned)time(NULL));   /* para desbloqueio aleatório no D */
 
-    /* Defaults */
+    /* Valores por defeito */
     cfg.algo            = SCHED_FCFS;
     cfg.time_quantum    = DEFAULT_QUANTUM;
     cfg.preemptive      = 1;
@@ -99,11 +95,10 @@ void manager_init(int argc, char **argv)
     strncpy(cfg.plan_file,    "data/plan.txt",    127);
     strncpy(cfg.control_file, "data/control.txt", 127);
 
-    /* Config file (try default location first) */
     load_config_file("data/config.txt");
     load_config_file("config.txt");
 
-    /* CLI overrides */
+    /* Opções da linha de comandos têm prioridade sobre o ficheiro */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--scheduler") == 0 && i+1 < argc)
             cfg.algo = parse_algo(argv[++i]);
@@ -121,7 +116,6 @@ void manager_init(int argc, char **argv)
             cfg.partition_count = atoi(argv[++i]);
     }
 
-    /* Init subsystems */
     memory_init();
     partitions_init(cfg.memory_total, cfg.partition_count);
     fifo_init(&ready_fifo);
@@ -130,7 +124,7 @@ void manager_init(int argc, char **argv)
     fifo_init(&wait_mem_queue);
     prio_init(&ready_prio, algo_cmp(cfg.algo), pcb_table);
 
-    /* Gestor PCB (PID 0) */
+    /* PCB do gestor (PID 0) — não executa instruções de utilizador */
     memset(pcb_table, 0, sizeof(pcb_table));
     pcb_table[0].pid    = MANAGER_PID;
     pcb_table[0].ppid   = -1;
@@ -143,10 +137,6 @@ void manager_init(int argc, char **argv)
     printf("[manager] Simulador iniciado. Algo=%d Quantum=%d Preemptive=%d\n",
            cfg.algo, cfg.time_quantum, cfg.preemptive);
 }
-
-/* ------------------------------------------------------------------ */
-/*  Plan loading                                                        */
-/* ------------------------------------------------------------------ */
 
 void manager_load_plan(void)
 {
@@ -164,7 +154,7 @@ void manager_load_plan(void)
         memset(&e, 0, sizeof(e));
         e.priority = DEFAULT_PRIORITY;
 
-        /* Format: program arrival [priority [period [deadline]]] */
+        /* Formato: programa.prg  chegada  [prioridade  [periodo  [prazo]]] */
         int n = sscanf(line, "%15s %d %d %d %d",
                        e.program_name, &e.arrival_time,
                        &e.priority, &e.period, &e.deadline);
@@ -177,17 +167,16 @@ void manager_load_plan(void)
            plan_count, cfg.plan_file);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Arrival check                                                       */
-/* ------------------------------------------------------------------ */
-
+/*
+ * Para cada entrada do plano cuja chegada <= sim_time,
+ * cria PCB, carrega programa e coloca em PRONTO (ou WAIT_MEM).
+ */
 void manager_check_arrivals(void)
 {
     for (int i = 0; i < plan_count; i++) {
         PlanEntry *e = &plan_entries[i];
         if (e->launched || e->arrival_time > sim_time) continue;
 
-        /* Allocate PCB */
         int idx = process_alloc_pcb(pcb_table, &pcb_count);
         if (idx < 0) continue;
 
@@ -202,10 +191,8 @@ void manager_check_arrivals(void)
         p->start_time   = -1;
         p->state        = PROC_NEW;
 
-        /* Load program into memory */
         int start = memory_load_program(e->program_name, pcb_table, pcb_count);
         if (start < 0) {
-            /* No instruction memory: put in wait_mem queue */
             p->state = PROC_WAIT_MEM;
             fifo_enqueue(&wait_mem_queue, idx);
             printf("[manager] PID %d '%s' aguardando memoria (t=%d)\n",
@@ -220,12 +207,10 @@ void manager_check_arrivals(void)
             if (p->deadline == 0 && p->period > 0)
                 p->deadline = p->arrival_time + p->period;
 
-            /* Optional partition check */
             if (partitions_enabled()) {
                 int needed = (p->memory_size > 0) ? p->memory_size : 1;
                 int part = partition_alloc(p->pid, needed);
                 if (part < 0) {
-                    /* Release instruction slot ref and defer */
                     memory_release(p->program_name, pcb_table, pcb_count);
                     p->state = PROC_WAIT_MEM;
                     fifo_enqueue(&wait_mem_queue, idx);
@@ -244,16 +229,12 @@ void manager_check_arrivals(void)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Ready queue management + preemption                                */
-/* ------------------------------------------------------------------ */
-
 void manager_make_ready(int idx)
 {
     pcb_table[idx].state = PROC_READY;
     sched_enqueue(cfg.algo, idx, &ready_fifo, &ready_prio);
 
-    /* Check preemption: running process loses CPU to higher-priority arrival */
+    /* Se o novo processo for mais prioritário, preempta o actual */
     if (running_idx >= 0 &&
         sched_should_preempt(cfg.algo, running_idx, idx,
                              pcb_table, cfg.preemptive, sim_time)) {
@@ -263,14 +244,9 @@ void manager_make_ready(int idx)
         running_idx = -1;
         pcb_table[old].state = PROC_READY;
         sched_enqueue(cfg.algo, old, &ready_fifo, &ready_prio);
-        /* idx is already in queue; context switch will pick the best */
         manager_context_switch();
     }
 }
-
-/* ------------------------------------------------------------------ */
-/*  Context switch                                                      */
-/* ------------------------------------------------------------------ */
 
 void manager_context_switch(void)
 {
@@ -288,10 +264,10 @@ void manager_context_switch(void)
            pcb_table[next].pid, sim_time);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Execute quantum                                                     */
-/* ------------------------------------------------------------------ */
-
+/*
+ * Comando E: executa até time_quantum ticks.
+ * Em cada tick: uma instrução, avança relógio, trata bloqueio/termino/fork.
+ */
 void manager_exec_quantum(void)
 {
     manager_check_arrivals();
@@ -310,15 +286,14 @@ void manager_exec_quantum(void)
         int child_idx = -1;
         int ret = process_exec_one(running_idx, pcb_table, &pcb_count,
                                    &child_idx, next_pid, sim_time);
-        if (ret == 3) next_pid++; /* pid was consumed by fork */
+        if (ret == 3) next_pid++;
         sim_time++;
         ticks_left--;
 
-        /* Check new arrivals each tick */
         manager_check_arrivals();
 
         switch (ret) {
-        case 1: /* Blocked */
+        case 1:   /* instrução B — bloqueado */
             fifo_enqueue(&blocked_queue, running_idx);
             printf("[exec] PID %d bloqueado (t=%d)\n",
                    pcb_table[running_idx].pid, sim_time);
@@ -326,7 +301,7 @@ void manager_exec_quantum(void)
             manager_context_switch();
             break;
 
-        case 2: /* Terminated */
+        case 2:   /* instrução T ou fim — terminado */
             printf("[exec] PID %d terminou (t=%d)\n",
                    pcb_table[running_idx].pid, sim_time);
             if (partitions_enabled())
@@ -336,7 +311,7 @@ void manager_exec_quantum(void)
             manager_context_switch();
             break;
 
-        case 3: /* Forked */
+        case 3:   /* instrução C — filho criado */
             if (child_idx >= 0) {
                 printf("[exec] PID %d criou filho PID %d (t=%d)\n",
                        pcb_table[running_idx].pid,
@@ -345,11 +320,10 @@ void manager_exec_quantum(void)
             }
             break;
 
-        case 4: /* Loaded new program */
+        case 4:   /* instrução L — programa substituído */
             printf("[exec] PID %d carregou novo programa '%s' (t=%d)\n",
                    pcb_table[running_idx].pid,
                    pcb_table[running_idx].program_name, sim_time);
-            /* SJF: rebuild heap with new remaining */
             if (cfg.algo == SCHED_SJF) prio_rebuild(&ready_prio);
             break;
 
@@ -358,7 +332,7 @@ void manager_exec_quantum(void)
         }
     }
 
-    /* Quantum expired: context switch */
+    /* Quantum esgotado sem bloquear/terminar: volta à fila de prontos */
     if (running_idx >= 0 && ticks_left == 0) {
         printf("[exec] Quantum expirado para PID %d (t=%d)\n",
                pcb_table[running_idx].pid, sim_time);
@@ -370,10 +344,7 @@ void manager_exec_quantum(void)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Interrupt (I command)                                              */
-/* ------------------------------------------------------------------ */
-
+/* Comando I: bloqueia o processo em execução (como um B externo) */
 void manager_interrupt(void)
 {
     if (running_idx < 0) {
@@ -382,26 +353,26 @@ void manager_interrupt(void)
     }
     printf("[interrupt] PID %d interrompido e bloqueado (t=%d)\n",
            pcb_table[running_idx].pid, sim_time);
-    /* Note: partitions are held through block/unblock; only released on T */
     pcb_table[running_idx].state = PROC_BLOCKED;
     fifo_enqueue(&blocked_queue, running_idx);
     running_idx = -1;
     manager_context_switch();
 }
 
-/* ------------------------------------------------------------------ */
-/*  Terminate (T command)                                              */
-/* ------------------------------------------------------------------ */
-
+/* Comando T: imprime estatísticas e termina */
 void manager_terminate(void)
 {
     report_global_stats(sim_time, pcb_table, pcb_count);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main control loop                                                   */
-/* ------------------------------------------------------------------ */
-
+/*
+ * Ciclo principal: lê control.txt ou stdin.
+ * E = executar quantum
+ * I = interromper
+ * D = desbloquear (longo prazo) + tentar carregar WAIT_MEM
+ * R = relatório
+ * T = terminar simulação
+ */
 void manager_run(void)
 {
     FILE *ctrl = NULL;
@@ -445,7 +416,7 @@ void manager_run(void)
         case 'D':
             sched_long(&blocked_queue, &ready_fifo, &ready_prio,
                        pcb_table, cfg.algo);
-            /* Also retry wait_mem processes */
+            /* Re-tentar processos que esperavam memória */
             for (int i = 0; i < fifo_size(&wait_mem_queue); ) {
                 int idx = fifo_dequeue(&wait_mem_queue);
                 int start = memory_load_program(pcb_table[idx].program_name,
@@ -458,7 +429,6 @@ void manager_run(void)
                     pcb_table[idx].memory_size =
                         (slot >= 0) ? prog_slots[slot].mem_size : 0;
                     pcb_table[idx].remaining = pcb_table[idx].memory_len;
-                    /* Optional partition */
                     if (partitions_enabled()) {
                         int needed = (pcb_table[idx].memory_size > 0)
                                      ? pcb_table[idx].memory_size : 1;
@@ -496,6 +466,5 @@ void manager_run(void)
 
     if (ctrl) fclose(ctrl);
 
-    /* Always print stats at end */
-    if (running) manager_terminate(); /* EOF reached without T */
+    if (running) manager_terminate();   /* fim do ficheiro sem T */
 }

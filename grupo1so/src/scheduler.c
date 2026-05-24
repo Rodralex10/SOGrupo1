@@ -1,21 +1,23 @@
+/*
+ * scheduler.c — Escalonamento de curto e longo prazo
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include "scheduler.h"
 
-/* ------------------------------------------------------------------ */
-/*  Comparators                                                         */
-/* ------------------------------------------------------------------ */
+/* --- Comparadores para o min-heap --- */
 
 int cmp_priority(int a, int b, const PCB *tbl)
 {
-    /* Lower priority number = higher precedence */
+    /* Número menor de prioridade = mais urgente; empate por chegada */
     int diff = tbl[a].priority - tbl[b].priority;
     if (diff != 0) return diff;
-    return tbl[a].arrival_time - tbl[b].arrival_time; /* FIFO tiebreak */
+    return tbl[a].arrival_time - tbl[b].arrival_time;
 }
 
 int cmp_sjf(int a, int b, const PCB *tbl)
 {
+    /* Menos instruções restantes = mais urgente */
     int diff = tbl[a].remaining - tbl[b].remaining;
     if (diff != 0) return diff;
     return tbl[a].arrival_time - tbl[b].arrival_time;
@@ -23,7 +25,7 @@ int cmp_sjf(int a, int b, const PCB *tbl)
 
 int cmp_rm(int a, int b, const PCB *tbl)
 {
-    /* Rate Monotonic: smaller period = higher priority */
+    /* Rate Monotonic: período mais curto = mais prioritário */
     int da = (tbl[a].period > 0) ? tbl[a].period : 0x7fffffff;
     int db = (tbl[b].period > 0) ? tbl[b].period : 0x7fffffff;
     int diff = da - db;
@@ -33,7 +35,7 @@ int cmp_rm(int a, int b, const PCB *tbl)
 
 int cmp_edf(int a, int b, const PCB *tbl)
 {
-    /* Earliest Deadline First: smaller absolute deadline wins */
+    /* Earliest Deadline First: prazo mais cedo primeiro */
     int da = (tbl[a].deadline > 0) ? tbl[a].deadline : 0x7fffffff;
     int db = (tbl[b].deadline > 0) ? tbl[b].deadline : 0x7fffffff;
     int diff = da - db;
@@ -41,10 +43,7 @@ int cmp_edf(int a, int b, const PCB *tbl)
     return tbl[a].arrival_time - tbl[b].arrival_time;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Enqueue / remove                                                   */
-/* ------------------------------------------------------------------ */
-
+/* Coloca processo na fila correcta consoante o algoritmo */
 void sched_enqueue(SchedAlgo algo, int idx,
                    FifoQueue *fifo_ready, PrioQueue *prio_ready)
 {
@@ -77,10 +76,7 @@ void sched_remove(SchedAlgo algo, int idx,
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Select next process                                                */
-/* ------------------------------------------------------------------ */
-
+/* Escalonador de curto prazo: escolhe o próximo da fila de prontos */
 int sched_short_select(SchedAlgo algo,
                        FifoQueue *fifo_ready,
                        PrioQueue *prio_ready,
@@ -100,10 +96,7 @@ int sched_short_select(SchedAlgo algo,
     return -1;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Preemption check                                                   */
-/* ------------------------------------------------------------------ */
-
+/* Verifica se o processo que chegou deve preemptar o que está a correr */
 int sched_should_preempt(SchedAlgo algo, int running_idx, int candidate_idx,
                          const PCB *pcb_table, int preemptive, int sim_time)
 {
@@ -114,7 +107,7 @@ int sched_should_preempt(SchedAlgo algo, int running_idx, int candidate_idx,
 
     switch (algo) {
     case SCHED_FCFS:
-        return 0; /* FCFS never preempts mid-quantum */
+        return 0;   /* FCFS não preempta por chegada */
 
     case SCHED_PRIORITY:
         return cmp_priority(candidate_idx, running_idx, pcb_table) < 0;
@@ -131,10 +124,10 @@ int sched_should_preempt(SchedAlgo algo, int running_idx, int candidate_idx,
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Long-term scheduler                                                */
-/* ------------------------------------------------------------------ */
-
+/*
+ * Escalonador de longo prazo (comando D):
+ * escolhe aleatoriamente um bloqueado e passa-o para PRONTO.
+ */
 int sched_long(FifoQueue *blocked_queue,
                FifoQueue *fifo_ready, PrioQueue *prio_ready,
                PCB *pcb_table, SchedAlgo algo)
@@ -142,17 +135,15 @@ int sched_long(FifoQueue *blocked_queue,
     int n = fifo_size(blocked_queue);
     if (n == 0) return 0;
 
-    /* Choose a random process to unblock */
     int pick_pos = rand() % n;
     int idx = -1;
 
-    /* Extract element at pick_pos */
     for (int i = 0; i < n; i++) {
         int tmp = fifo_dequeue(blocked_queue);
         if (i == pick_pos) {
             idx = tmp;
         } else {
-            fifo_enqueue(blocked_queue, tmp); /* put back */
+            fifo_enqueue(blocked_queue, tmp);
         }
     }
 
